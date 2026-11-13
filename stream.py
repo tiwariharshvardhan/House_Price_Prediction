@@ -1,9 +1,7 @@
 import streamlit as st
 import pickle
-import numpy as np
 import pandas as pd
 from pathlib import Path
-from sklearn.preprocessing import OneHotEncoder
 
 
 ROOT = Path(__file__).resolve().parent
@@ -26,40 +24,38 @@ def load_artifacts():
     return classifier, encoder
 
 
-def predict_price(unput):
+def predict_price(features):
     classifier, encoder = load_artifacts()
-    # Identify categorical columns
-    obj_col = unput.select_dtypes(include=['object']).columns.tolist()
+    # Ask the encoder which columns it was fitted on rather than sniffing dtypes,
+    # which pandas 4 changes for object/str columns.
+    cat_cols = list(encoder.feature_names_in_)
 
-    # Transform categorical columns using the pre-fitted encoder
-    one_hot_encoded = encoder.transform(unput[obj_col])
-    one_hot_df = pd.DataFrame(one_hot_encoded, columns=encoder.get_feature_names_out(obj_col), index=unput.index)
+    one_hot = pd.DataFrame(
+        encoder.transform(features[cat_cols]),
+        columns=encoder.get_feature_names_out(cat_cols),
+        index=features.index,
+    )
+    encoded = pd.concat([features.drop(columns=cat_cols), one_hot], axis=1)
 
-    # Drop original categorical columns and merge with encoded features
-    df_encoded = unput.drop(columns=obj_col)
-    df_encoded = pd.concat([df_encoded, one_hot_df], axis=1)
+    # Same column order the model was trained with; anything absent is a zero.
+    encoded = encoded.reindex(columns=classifier.feature_names_in_, fill_value=0)
+    return classifier.predict(encoded)
 
-    # Ensure the column order matches training
-    expected_columns = classifier.feature_names_in_
-    df_encoded = df_encoded.reindex(columns=expected_columns, fill_value=0)  # Fill missing columns with 0
-
-    # Predict using the classifier
-    prediction = classifier.predict(df_encoded)
-    return prediction
-
-def hommie():
-    load_artifacts()  # surface a missing-model error before the form, not after
+def prediction_form():
+    _, encoder = load_artifacts()  # surface a missing-model error before the form, not after
+    # Offer exactly the categories the encoder was fitted on, so the two can't drift apart.
+    options = dict(zip(encoder.feature_names_in_, encoder.categories_))
     html_temp = """
     <div style="background-color:tomato;padding:10px">
     <h2 style="color:white;text-align:center;">House Price Prediction ML App </h2>
     </div>
     """
     st.markdown(html_temp,unsafe_allow_html=True)
-    # Categorical Inputs (Convert to String)
-    MSZoning = st.selectbox("MSZoning", {"RL":'MSZoning_RL', "RM":'MSZoning_RM', "C (all)":'MSZoning_C (all)', "FV":'MSZoning_FV', "RH":'MSZoning_RH'})  # Example categories
-    LotConfig = st.selectbox("LotConfig", {"Inside":'LotConfig_Inside', "Corner":'LotConfig_Corner', "CulDSac":'LotConfig_CulDSac', "FR2":'LotConfig_FR2', "FR3":'LotConfig_FR3'})
-    BldgType = st.selectbox("BldgType", {"1Fam":'BldgType_1Fam', "2fmCon":'BldgType_2fmCon', "Duplex":'BldgType_Duplex', "Twnhs":'BldgType_Twnhs', "TwnhsE":'BldgType_TwnhsE'})
-    Exterior1st = st.selectbox("Exterior1st", {"AsbShng":'Exterior1st_AsbShng',"AsphShn":'Exterior1st_AsphShn',"BrkComm":'Exterior1st_BrkComm',"BrkFace":'Exterior1st_BrkFace',"CBlock":'Exterior1st_CBlock',"CemntBd":'Exterior1st_CemntBd',"HdBoard":'Exterior1st_HdBoard',"ImStucc":'Exterior1st_ImStucc',"MetalSd":'Exterior1st_MetalSd',"Plywood":'Exterior1st_Plywood',"Stone":'Exterior1st_Stone',"Stucco":'Exterior1st_Stucco',"VinylSd":'Exterior1st_VinylSd',"Wd Sdng":'Exterior1st_Wd Sdng',"WdShing":'Exterior1st_WdShing'})
+    # Categorical inputs
+    MSZoning = st.selectbox("MSZoning", options["MSZoning"])
+    LotConfig = st.selectbox("LotConfig", options["LotConfig"])
+    BldgType = st.selectbox("BldgType", options["BldgType"])
+    Exterior1st = st.selectbox("Exterior1st", options["Exterior1st"])
     # Numerical Inputs (Convert to float/int)
     MSSubClass = int(st.number_input("MSSubClass", min_value=0, max_value=200, value=60))
     LotArea = float(st.number_input("LotArea", min_value=1000, max_value=50000, value=7000))
@@ -82,10 +78,9 @@ def hommie():
         "BsmtFinSF2": [BsmtFinSF2],
         "TotalBsmtSF": [TotalBsmtSF]
         })
-    result=""
     if st.button("Predict"):
-        result=predict_price(input_data)
-    st.success('The output is {}'.format(result))
+        price = predict_price(input_data)[0]
+        st.success(f"Estimated sale price: ${price:,.0f}")
 
 
 def main():
@@ -96,7 +91,7 @@ def main():
     if choice == "Home":
         st.header("Home Page")
         st.write("This is the home page of the app.")
-        hommie()
+        prediction_form()
     
     elif choice == "About":
         st.header("About Page")
