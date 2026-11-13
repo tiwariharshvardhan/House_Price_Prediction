@@ -1,16 +1,33 @@
 import streamlit as st
-import pickle 
+import pickle
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from sklearn.preprocessing import OneHotEncoder
 
 
-pickle_in=open("file.pkl","rb")
-classifier=pickle.load(pickle_in)
-pickle_inn=open("encod.pkl","rb")
-encoder=pickle.load(pickle_inn)
+ROOT = Path(__file__).resolve().parent
+
+
+@st.cache_resource
+def load_artifacts():
+    """Unpickle the model and encoder once per session, not on every rerun."""
+    try:
+        with open(ROOT / "file.pkl", "rb") as f:
+            classifier = pickle.load(f)
+        with open(ROOT / "encod.pkl", "rb") as f:
+            encoder = pickle.load(f)
+    except FileNotFoundError as err:
+        st.error(
+            f"Could not find `{Path(err.filename).name}`. "
+            "Run `python train.py` to build the model files, then reload."
+        )
+        st.stop()
+    return classifier, encoder
+
 
 def predict_price(unput):
+    classifier, encoder = load_artifacts()
     # Identify categorical columns
     obj_col = unput.select_dtypes(include=['object']).columns.tolist()
 
@@ -31,6 +48,7 @@ def predict_price(unput):
     return prediction
 
 def hommie():
+    load_artifacts()  # surface a missing-model error before the form, not after
     html_temp = """
     <div style="background-color:tomato;padding:10px">
     <h2 style="color:white;text-align:center;">House Price Prediction ML App </h2>
